@@ -175,6 +175,9 @@ static inline void trace_kill_end() {}
 
 #define WATCHDOG_TIMEOUT_SEC 2
 
+/* lowmemorykiller disabler */
+static bool lmkd_enabled;
+
 /* default to old in-kernel interface if no memory pressure events */
 static bool use_inkernel_interface = true;
 static bool has_inkernel_module;
@@ -2586,6 +2589,7 @@ static void start_wait_for_proc_kill(int pid_or_fd) {
 static int kill_one_process(struct proc* procp, int min_oom_score, struct kill_info *ki,
                             union meminfo *mi, struct wakeup_info *wi, struct timespec *tm,
                             struct psi_data *pd) {
+    if (lmkd_enabled) {
     int pid = procp->pid;
     int pidfd = procp->pidfd;
     uid_t uid = procp->uid;
@@ -2694,6 +2698,9 @@ out:
      */
     pid_remove(pid);
     return result;
+    } else {
+        return 0;
+    }
 }
 
 /*
@@ -2725,9 +2732,13 @@ static int find_and_kill_process(int min_score_adj, struct kill_info *ki, union 
             if (!procp)
                 break;
 
-            killed_size = kill_one_process(procp, min_score_adj, ki, mi, wi, tm, pd);
-            if (killed_size >= 0) {
+            if (!lmkd_enabled) {
                 break;
+            } else {
+                killed_size = kill_one_process(procp, min_score_adj, ki, mi, wi, tm, pd);
+                if (killed_size >= 0) {
+                    break;
+                }
             }
         }
         if (killed_size) {
@@ -4182,6 +4193,7 @@ static int on_boot_completed() {
 }
 
 static bool update_props() {
+    lmkd_enabled = property_get_bool("ro.config.lmkd_enabled", false);
     /* By default disable low level vmpressure events */
     level_oomadj[VMPRESS_LEVEL_LOW] =
         GET_LMK_PROPERTY(int32, "low", OOM_SCORE_ADJ_MAX + 1);
